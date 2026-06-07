@@ -1,4 +1,4 @@
-name: openclaw_web_search
+name: astrbot_plugin_openclaw_search
 description: 多引擎搜索（搜狗/Google/Bing，含LLM函数调用）
 version: 3.0.0
 author: openclaw
