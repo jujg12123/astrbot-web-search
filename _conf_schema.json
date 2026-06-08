@@ -1,0 +1,17 @@
+{
+  "engine": {
+    "description": "搜索引擎选择",
+    "type": "string",
+    "default": "sogou",
+    "enum": ["sogou", "google", "bing"],
+    "hint": "推荐使用搜狗搜索（中文支持最好）"
+  },
+  "max_results": {
+    "description": "最大搜索结果数量",
+    "type": "int",
+    "default": 5,
+    "min": 1,
+    "max": 10,
+    "hint": "控制每次搜索返回的结果条数"
+  }
+}
