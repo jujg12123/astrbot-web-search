@@ -1,28 +1,17 @@
 {
   "engine": {
-    "description": "搜索引擎",
-    "type": "dropdown",
+    "description": "搜索引擎选择（推荐Bing，国内直连）",
+    "type": "string",
     "default": "bing",
-    "options": [
-      {
-        "label": "Bing（推荐，国内直连，结果全面）",
-        "value": "bing"
-      },
-      {
-        "label": "搜狗搜索（中文友好）",
-        "value": "sogou"
-      },
-      {
-        "label": "Google 搜索（需代理）",
-        "value": "google"
-      }
-    ]
+    "enum": ["bing", "sogou", "google"],
+    "hint": "Bing国内可直连，搜狗中文友好，Google需代理"
   },
   "max_results": {
-    "description": "搜索结果数量（1-10）",
+    "description": "搜索结果数量",
     "type": "int",
     "default": 8,
     "min": 1,
-    "max": 10
+    "max": 10,
+    "hint": "控制每次搜索返回的结果条数"
   }
 }
