@@ -25,7 +25,7 @@ from astrbot.core.star.filter.command import GreedyStr
 CHANGELOG = """
 📋 **多引擎搜索插件 更新日志**
 
-**v3.1.1** (2026-06-08)
+**v3.1.2** (2026-06-08)
 - 🔧 修复插件配置不生效的问题（改为接收 AstrBotConfig）
 - 🌐 默认搜索引擎改为 **Bing**（国内可直连，结果全面）
 - 📝 新增 /websearch changelog 命令查看更新日志
@@ -47,7 +47,7 @@ CHANGELOG = """
 SEARCH_ENGINES = {
     "bing": {
         "name": "Bing",
-        "url": "https://www.bing.com/search?q={query}&count={num}",
+        "url": "https://cn.bing.com/search?q={query}&count={num}",
         "headers": {
             "User-Agent": "Mozilla/5.0 (compatible; AstrBot/1.0)",
             "Accept-Language": "zh-CN,zh;q=0.9",
@@ -245,7 +245,7 @@ class WebSearchTool(FunctionTool):
     "astrbot_plugin_web_search",
     "openclaw",
     "多引擎搜索（Bing/搜狗/Google），LLM可主动调用，搜索结果反馈给AI",
-    "3.1.1",
+    "3.1.2",
     "https://github.com/jujg12123/astrbot-web-search",
 )
 class WebSearchPlugin(Star):
@@ -261,7 +261,7 @@ class WebSearchPlugin(Star):
         self._backend = SearchBackend(engine)
         self._tool = WebSearchTool(backend=self._backend)
         context.add_llm_tools(self._tool)
-        logger.info(f"[WebSearch] v3.1.1 已就绪 | 引擎={engine}")
+        logger.info(f"[WebSearch] v3.1.2 已就绪 | 引擎={engine}")
 
     async def terminate(self):
         self.context.provider_manager.llm_tools.remove_func(self._tool.name)
@@ -277,7 +277,7 @@ class WebSearchPlugin(Star):
 
         if not query:
             yield event.plain_result(
-                "🔍 **多引擎搜索插件 v3.1.1**\n"
+                "🔍 **多引擎搜索插件 v3.1.2**\n"
                 "用法：/websearch 关键词\n"
                 f"当前引擎：{self._backend.engine}\n"
                 "输入 /websearch changelog 查看更新日志"
