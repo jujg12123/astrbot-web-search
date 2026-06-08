@@ -2,9 +2,10 @@
 
 功能：
   /websearch [关键词] — 手动搜索（结构化输出）
+  /websearch changelog — 查看更新日志
   web_search — LLM 函数工具，AI 可在对话中主动调用联网搜索
 
-引擎：搜狗（推荐）/ Google / Bing
+引擎：Bing（默认）/ 搜狗 / Google
 """
 
 import asyncio
@@ -15,13 +16,43 @@ import urllib.parse
 import html as html_module
 from dataclasses import dataclass, field
 
-from astrbot.api import logger, FunctionTool
+from astrbot.api import AstrBotConfig, logger, FunctionTool
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.core.star.filter.command import GreedyStr
 
+# ═════════════════════════ 更新日志 ═════════════════════════
+CHANGELOG = """
+📋 **多引擎搜索插件 更新日志**
+
+**v3.1.1** (2026-06-08)
+- 🔧 修复插件配置不生效的问题（改为接收 AstrBotConfig）
+- 🌐 默认搜索引擎改为 **Bing**（国内可直连，结果全面）
+- 📝 新增 /websearch changelog 命令查看更新日志
+- 🎨 配置界面增强：每个引擎附带详细描述
+
+**v3.1.0** (2026-06-08)
+- 🤖 LLM 函数工具改用 add_llm_tools() 显式注册
+- 📊 搜索结果双格式：LLM 收到纯文本，用户看到富格式
+- 🧹 新增 terminate() 清理机制
+- 🔤 支持中文别名 /搜索
+
+**v3.0.x** (2026-06-07)
+- 🌐 多引擎支持：搜狗 / Google / Bing
+- 📌 skill 风格结构化输出
+- ⚙️ 插件配置界面
+""".strip()
+
 # ═════════════════════════ 搜索引擎 ═════════════════════════
 SEARCH_ENGINES = {
+    "bing": {
+        "name": "Bing",
+        "url": "https://www.bing.com/search?q={query}&count={num}",
+        "headers": {
+            "User-Agent": "Mozilla/5.0 (compatible; AstrBot/1.0)",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+        },
+    },
     "sogou": {
         "name": "搜狗",
         "url": "https://www.sogou.com/web?query={query}",
@@ -38,18 +69,27 @@ SEARCH_ENGINES = {
             "Accept-Language": "zh-CN,zh;q=0.9",
         },
     },
-    "bing": {
-        "name": "Bing",
-        "url": "https://www.bing.com/search?q={query}&count={num}",
-        "headers": {
-            "User-Agent": "Mozilla/5.0 (compatible; AstrBot/1.0)",
-            "Accept-Language": "zh-CN,zh;q=0.9",
-        },
-    },
 }
 
 
 # ═════════════════════════ HTML 解析 ═════════════════════════
+def _parse_bing(html: str) -> list:
+    results = []
+    blocks = re.findall(r'<li[^>]*class="b_algo"[^>]*>.*?</li>', html, re.DOTALL)
+    for block in blocks[:10]:
+        tm = re.search(r'<h2[^>]*>(.*?)</h2>', block, re.DOTALL)
+        if not tm: continue
+        title = html_module.unescape(re.sub(r"<.*?>", "", tm.group(1)).strip())
+        if not title or len(title) <= 3: continue
+        sm = re.search(r'<p[^>]*>(.*?)</p>', block, re.DOTALL)
+        snippet = html_module.unescape(re.sub(r"<.*?>", "", sm.group(1)).strip())[:200] if sm else ""
+        lm = re.search(r'<a[^>]*href="([^"]+)"', block)
+        url = lm.group(1) if lm else ""
+        results.append({"title": title, "snippet": snippet, "url": url})
+        if len(results) >= 10: break
+    return results
+
+
 def _parse_sogou(html: str) -> list:
     results = []
     titles = re.findall(r'<h3[^>]*class="(?:vr-title[^"]*)"[^>]*>.*?<a[^>]*>(.*?)</a>', html, re.DOTALL)
@@ -83,29 +123,11 @@ def _parse_google(html: str) -> list:
     return results
 
 
-def _parse_bing(html: str) -> list:
-    results = []
-    blocks = re.findall(r'<li[^>]*class="b_algo"[^>]*>.*?</li>', html, re.DOTALL)
-    for block in blocks[:10]:
-        tm = re.search(r'<h2[^>]*>(.*?)</h2>', block, re.DOTALL)
-        if not tm: continue
-        title = html_module.unescape(re.sub(r"<.*?>", "", tm.group(1)).strip())
-        if not title or len(title) <= 3: continue
-        sm = re.search(r'<p[^>]*>(.*?)</p>', block, re.DOTALL)
-        snippet = html_module.unescape(re.sub(r"<.*?>", "", sm.group(1)).strip())[:200] if sm else ""
-        lm = re.search(r'<a[^>]*href="([^"]+)"', block)
-        url = lm.group(1) if lm else ""
-        results.append({"title": title, "snippet": snippet, "url": url})
-        if len(results) >= 10: break
-    return results
-
-
-PARSERS = {"sogou": _parse_sogou, "google": _parse_google, "bing": _parse_bing}
+PARSERS = {"bing": _parse_bing, "sogou": _parse_sogou, "google": _parse_google}
 
 
 # ═════════════════════════ 格式化 ═════════════════════════
 def _format_for_user(query: str, results: list, engine_name: str) -> str:
-    """给用户看的富格式"""
     if not results:
         return f'🔍 「{query}」未找到相关结果，请换个关键词试试。'
     top = results[:5]
@@ -130,7 +152,6 @@ def _format_for_user(query: str, results: list, engine_name: str) -> str:
 
 
 def _format_for_llm(query: str, results: list, engine_name: str) -> str:
-    """给 LLM 看的纯文本，让 AI 能更好理解搜索结果"""
     if not results:
         return f'未找到关于 "{query}" 的搜索结果。'
     lines = [f'以下是关于 "{query}" 的{engine_name}搜索结果：', '']
@@ -145,17 +166,17 @@ def _format_for_llm(query: str, results: list, engine_name: str) -> str:
 
 # ═════════════════════════ 搜索后端 ═════════════════════════
 class SearchBackend:
-    def __init__(self, engine: str = "sogou"):
+    def __init__(self, engine: str = "bing"):
         self.engine = engine
 
     def search(self, query: str, max_results: int = 5) -> str:
-        cfg = SEARCH_ENGINES.get(self.engine, SEARCH_ENGINES["sogou"])
+        cfg = SEARCH_ENGINES.get(self.engine, SEARCH_ENGINES["bing"])
         try:
             url = cfg["url"].format(query=urllib.parse.quote(query), num=max_results)
             req = urllib.request.Request(url, headers=dict(cfg["headers"]))
             with urllib.request.urlopen(req, timeout=15) as resp:
                 html = resp.read().decode("utf-8", errors="replace")
-            results = PARSERS.get(self.engine, _parse_sogou)(html)
+            results = PARSERS.get(self.engine, _parse_bing)(html)
             return _format_for_llm(query, results, cfg["name"])
         except urllib.error.HTTPError as e:
             return f'搜索 HTTP 错误({e.code})，请稍后重试。'
@@ -167,13 +188,13 @@ class SearchBackend:
             return f'搜索出错：{type(e).__name__} - {e}'
 
     def search_for_user(self, query: str, max_results: int = 5) -> str:
-        cfg = SEARCH_ENGINES.get(self.engine, SEARCH_ENGINES["sogou"])
+        cfg = SEARCH_ENGINES.get(self.engine, SEARCH_ENGINES["bing"])
         try:
             url = cfg["url"].format(query=urllib.parse.quote(query), num=max_results)
             req = urllib.request.Request(url, headers=dict(cfg["headers"]))
             with urllib.request.urlopen(req, timeout=15) as resp:
                 html = resp.read().decode("utf-8", errors="replace")
-            results = PARSERS.get(self.engine, _parse_sogou)(html)
+            results = PARSERS.get(self.engine, _parse_bing)(html)
             return _format_for_user(query, results, cfg["name"])
         except urllib.error.HTTPError as e:
             return f'🔍 搜索 HTTP 错误({e.code})，请稍后重试。'
@@ -188,7 +209,6 @@ class SearchBackend:
 # ═════════════════════════ LLM 函数工具 ═════════════════════════
 @dataclass
 class WebSearchTool(FunctionTool):
-    """LLM 可调用的联网搜索工具，搜索结果会直接反馈给 LLM 用于回答"""
     backend: SearchBackend = field(repr=False, default_factory=SearchBackend)
     name: str = "web_search"
     description: str = (
@@ -224,40 +244,45 @@ class WebSearchTool(FunctionTool):
 @register(
     "astrbot_plugin_web_search",
     "openclaw",
-    "多引擎搜索（搜狗/Google/Bing），LLM可主动调用，搜索结果反馈给AI用于回答",
-    "3.1.0",
+    "多引擎搜索（Bing/搜狗/Google），LLM可主动调用，搜索结果反馈给AI",
+    "3.1.1",
     "https://github.com/jujg12123/astrbot-web-search",
 )
 class WebSearchPlugin(Star):
-    def __init__(self, context: Context):
+    def __init__(self, context: Context, config: AstrBotConfig | dict | None = None):
         super().__init__(context)
 
-        engine = "sogou"
-        try:
-            cfg = context.get_config()
-            engine = cfg.get("engine", "sogou")
-        except Exception:
-            pass
+        # 从 AstrBotConfig 加载配置（修复配置不生效问题）
+        config = config or {}
+        engine = config.get("engine", "bing")
         if engine not in SEARCH_ENGINES:
-            engine = "sogou"
+            engine = "bing"
 
         self._backend = SearchBackend(engine)
         self._tool = WebSearchTool(backend=self._backend)
-
-        # 注册 LLM 函数工具
         context.add_llm_tools(self._tool)
-        logger.info(f"[WebSearch] v3.1.0 已就绪 | 引擎={engine}")
+        logger.info(f"[WebSearch] v3.1.1 已就绪 | 引擎={engine}")
 
     async def terminate(self):
-        """插件卸载时清理"""
         self.context.provider_manager.llm_tools.remove_func(self._tool.name)
         logger.info("[WebSearch] 已卸载")
 
     @filter.command("websearch", alias={"搜索", "websearch"})
     async def on_command(self, event: AstrMessageEvent, query: GreedyStr):
         query = query.strip()
-        if not query:
-            yield event.plain_result("🔍 用法：/websearch 关键词")
+
+        if query.lower() in ("changelog", "更新日志", "版本"):
+            yield event.plain_result(CHANGELOG)
             return
+
+        if not query:
+            yield event.plain_result(
+                "🔍 **多引擎搜索插件 v3.1.1**\n"
+                "用法：/websearch 关键词\n"
+                f"当前引擎：{self._backend.engine}\n"
+                "输入 /websearch changelog 查看更新日志"
+            )
+            return
+
         result = await asyncio.to_thread(self._backend.search_for_user, query)
         yield event.plain_result(result)
