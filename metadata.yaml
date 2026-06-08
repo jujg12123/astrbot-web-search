@@ -1,6 +1,6 @@
 name: astrbot_plugin_web_search
 display_name: 多引擎搜索
-desc: 支持搜狗/Google/Bing多引擎搜索，结构化输出含核心发现+详情+建议，LLM可主动调用
-version: v3.0.2
+desc: 搜狗/Google/Bing多引擎搜索，LLM可主动调用，结构化输出含核心发现+详情+建议
+version: v3.0.3
 author: openclaw
 repo: https://github.com/jujg12123/astrbot-web-search
