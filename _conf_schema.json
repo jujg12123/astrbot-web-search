@@ -1,22 +1,28 @@
 {
   "engine": {
-    "description": "搜索引擎选择",
-    "type": "string",
+    "description": "搜索引擎",
+    "type": "dropdown",
     "default": "bing",
-    "enum": ["bing", "sogou", "google"],
-    "enum_desc": {
-      "bing": "Bing 搜索 — 微软搜索引擎，国内可直连，结果全面（推荐）",
-      "sogou": "搜狗搜索 — 中文友好，国内最稳定",
-      "google": "Google 搜索 — 全球最大搜索引擎，需网络环境支持"
-    },
-    "hint": "切换后需重启插件生效 | 推荐使用 Bing"
+    "options": [
+      {
+        "label": "Bing（推荐，国内直连，结果全面）",
+        "value": "bing"
+      },
+      {
+        "label": "搜狗搜索（中文友好）",
+        "value": "sogou"
+      },
+      {
+        "label": "Google 搜索（需代理）",
+        "value": "google"
+      }
+    ]
   },
   "max_results": {
-    "description": "最大搜索结果数",
+    "description": "搜索结果数量（1-10）",
     "type": "int",
-    "default": 5,
+    "default": 8,
     "min": 1,
-    "max": 10,
-    "hint": "每次搜索返回的结果条数（1-10）"
+    "max": 10
   }
 }
