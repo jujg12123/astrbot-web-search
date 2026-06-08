@@ -2,14 +2,14 @@
   "engine": {
     "description": "搜索引擎选择",
     "type": "string",
-    "default": "sogou",
-    "enum": ["sogou", "google", "bing"],
+    "default": "bing",
+    "enum": ["bing", "sogou", "google"],
     "enum_desc": {
+      "bing": "Bing 搜索 — 微软搜索引擎，国内可直连，结果全面（推荐）",
       "sogou": "搜狗搜索 — 中文友好，国内最稳定",
-      "google": "Google 搜索 — 结果全面，需网络环境支持",
-      "bing": "Bing 搜索 — 微软搜索引擎，国内可直连"
+      "google": "Google 搜索 — 全球最大搜索引擎，需网络环境支持"
     },
-    "hint": "选择你想要使用的搜索引擎"
+    "hint": "切换后需重启插件生效 | 推荐使用 Bing"
   },
   "max_results": {
     "description": "最大搜索结果数",
