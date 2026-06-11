@@ -5,7 +5,7 @@
   /websearch changelog — 查看更新日志
   web_search — LLM 函数工具，AI 可在对话中主动调用联网搜索
 
-引擎：Bing（默认，中文自动引号精确匹配）/ 搜狗 / Google
+引擎：Bing（默认，中文片段自动引号精确匹配）/ 搜狗 / Google
 """
 
 import asyncio
@@ -24,6 +24,13 @@ from astrbot.core.star.filter.command import GreedyStr
 # ═════════════════════════ 更新日志 ═════════════════════════
 CHANGELOG = """
 📋 **多引擎搜索插件 更新日志**
+
+**v3.1.5** (2026-06-11)
+- 🐛 改进 Bing 中文搜索防拆字策略
+  - 不再对整句一刀切加引号，改为只给中文连续片段加双引号
+  - 例如 `原神 最新兑换码` 会变成 `"原神" 最新兑换码`
+  - 对 `双花`、`明日方舟 wiki` 这类混合关键词更稳
+- 🌐 默认搜索引擎仍为 Bing
 
 **v3.1.4** (2026-06-08)
 - 🐛 修复 Bing 搜索中文时自动拆单字的问题
@@ -86,13 +93,24 @@ SEARCH_ENGINES = {
 
 # ═════════════════════════ 查询预处理 ═════════════════════════
 _CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]')
+_CJK_SEGMENT_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]{2,}')
+
+
+def _quote_cjk_segments(query: str) -> str:
+    """Only quote contiguous Chinese segments so mixed queries stay flexible."""
+
+    def repl(match: re.Match) -> str:
+        segment = match.group(0)
+        return f'"{segment}"'
+
+    return _CJK_SEGMENT_RE.sub(repl, query)
 
 
 def _preprocess_query(query: str, engine: str) -> str:
-    """Bing 中文搜索会将复合词拆成单字（原神 → 原 + 神），
-       检测到 CJK 字符时自动加双引号强制短语匹配。"""
+    """Bing 中文搜索会将复合词拆成单字（原神 → 原 + 神）。
+       对中文连续片段加双引号，尽量保留其他关键词的自由匹配。"""
     if engine == "bing" and _CJK_RE.search(query):
-        return f'"{query}"'
+        return _quote_cjk_segments(query)
     return query
 
 
@@ -290,9 +308,9 @@ class WebSearchTool(FunctionTool):
 # ═════════════════════════ 插件 ═════════════════════════
 @register(
     "astrbot_plugin_web_search",
-    "openclaw",
+    "jujg12123",
     "多引擎搜索（Bing/搜狗/Google），LLM可主动调用，默认Bing",
-    "3.1.4",
+    "3.1.5",
     "https://github.com/jujg12123/astrbot-web-search",
 )
 class WebSearchPlugin(Star):
@@ -307,7 +325,7 @@ class WebSearchPlugin(Star):
         self._backend = SearchBackend(engine)
         self._tool = WebSearchTool(backend=self._backend)
         context.add_llm_tools(self._tool)
-        logger.info(f"[WebSearch] v3.1.4 已就绪 | 引擎={engine} | 中文引号优化=ON")
+        logger.info(f"[WebSearch] v3.1.5 已就绪 | 引擎={engine} | 中文分段引号优化=ON")
 
     async def terminate(self):
         self.context.provider_manager.llm_tools.remove_func(self._tool.name)
@@ -323,7 +341,7 @@ class WebSearchPlugin(Star):
 
         if not query:
             yield event.plain_result(
-                "🔍 **多引擎搜索插件 v3.1.4**\n"
+                "🔍 **多引擎搜索插件 v3.1.5**\n"
                 "用法：/websearch 关键词\n"
                 f"当前引擎：{self._backend.engine}\n"
                 "输入 /websearch changelog 查看更新日志"
