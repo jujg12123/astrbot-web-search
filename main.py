@@ -5,7 +5,7 @@
   /websearch changelog — 查看更新日志
   web_search — LLM 函数工具，AI 可在对话中主动调用联网搜索
 
-引擎：Bing（默认，中文片段自动引号精确匹配）/ 搜狗 / Google
+引擎：Bing（默认，中文片段自动引号精确匹配 + 拆字污染回退）/ 搜狗 / Google
 """
 
 import asyncio
@@ -24,6 +24,12 @@ from astrbot.core.star.filter.command import GreedyStr
 # ═════════════════════════ 更新日志 ═════════════════════════
 CHANGELOG = """
 📋 **多引擎搜索插件 更新日志**
+
+**v3.1.6** (2026-06-11)
+- 🛡️ 新增 Bing 拆字污染检测与自动回退
+  - 首次搜索仍使用中文连续片段加双引号策略
+  - 若前几条结果疑似被字典/释义类页面污染，会自动追加去噪负关键词重试一次
+  - 默认追加 `-字典 -释义 -汉语 -词典`，尽量不猜测用户领域
 
 **v3.1.5** (2026-06-11)
 - 🐛 改进 Bing 中文搜索防拆字策略
@@ -94,6 +100,8 @@ SEARCH_ENGINES = {
 # ═════════════════════════ 查询预处理 ═════════════════════════
 _CJK_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]')
 _CJK_SEGMENT_RE = re.compile(r'[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]{2,}')
+_BING_NOISE_WORDS = ("字典", "词典", "释义", "汉语", "部首", "拼音", "笔画")
+_BING_FALLBACK_SUFFIX = ' -字典 -释义 -汉语 -词典'
 
 
 def _quote_cjk_segments(query: str) -> str:
@@ -112,6 +120,29 @@ def _preprocess_query(query: str, engine: str) -> str:
     if engine == "bing" and _CJK_RE.search(query):
         return _quote_cjk_segments(query)
     return query
+
+
+def _looks_like_bing_split_noise(query: str, results: list) -> bool:
+    """Detect obvious dictionary-like pollution for short Chinese concepts."""
+    if not query or not results or not _CJK_RE.search(query):
+        return False
+
+    top = results[:3]
+    noisy = 0
+    for item in top:
+        title = item.get("title", "")
+        snippet = item.get("snippet", "")
+        text = f"{title} {snippet}"
+        if any(word in text for word in _BING_NOISE_WORDS):
+            noisy += 1
+
+    return noisy >= 2
+
+
+def _build_bing_fallback_query(query: str) -> str:
+    if _BING_FALLBACK_SUFFIX.strip() in query:
+        return query
+    return f"{query}{_BING_FALLBACK_SUFFIX}"
 
 
 # ═════════════════════════ HTML 解析 ═════════════════════════
@@ -230,17 +261,34 @@ class SearchBackend:
     def __init__(self, engine: str = "bing"):
         self.engine = engine
 
-    def search(self, query: str, max_results: int = 8) -> str:
-        """供 LLM 工具调用，返回纯搜索结果"""
+    def _fetch_results(self, query: str, max_results: int) -> tuple[list, str]:
         cfg = SEARCH_ENGINES.get(self.engine, SEARCH_ENGINES["bing"])
-        try:
-            q = _preprocess_query(query, self.engine)
+        q = _preprocess_query(query, self.engine)
+        url = cfg["url"].format(query=urllib.parse.quote(q), num=max_results)
+        req = urllib.request.Request(url, headers=dict(cfg["headers"]))
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            html = resp.read().decode("utf-8", errors="replace")
+        results = PARSERS.get(self.engine, _parse_bing)(html)
+
+        # Retry noisy Bing results with light negative keywords instead of guessing intent.
+        if self.engine == "bing" and _looks_like_bing_split_noise(query, results):
+            fallback_query = _build_bing_fallback_query(query)
+            q = _preprocess_query(fallback_query, self.engine)
             url = cfg["url"].format(query=urllib.parse.quote(q), num=max_results)
             req = urllib.request.Request(url, headers=dict(cfg["headers"]))
             with urllib.request.urlopen(req, timeout=15) as resp:
                 html = resp.read().decode("utf-8", errors="replace")
-            results = PARSERS.get(self.engine, _parse_bing)(html)
-            return _format_for_llm(query, results, cfg["name"])
+            retried = PARSERS.get(self.engine, _parse_bing)(html)
+            if retried:
+                results = retried
+
+        return results, cfg["name"]
+
+    def search(self, query: str, max_results: int = 8) -> str:
+        """供 LLM 工具调用，返回纯搜索结果"""
+        try:
+            results, engine_name = self._fetch_results(query, max_results)
+            return _format_for_llm(query, results, engine_name)
         except urllib.error.HTTPError as e:
             return f'搜索 HTTP 错误({e.code})，请稍后重试。'
         except urllib.error.URLError as e:
@@ -252,15 +300,9 @@ class SearchBackend:
 
     def search_for_user(self, query: str, max_results: int = 8) -> str:
         """供用户命令调用，返回结构化显示"""
-        cfg = SEARCH_ENGINES.get(self.engine, SEARCH_ENGINES["bing"])
         try:
-            q = _preprocess_query(query, self.engine)
-            url = cfg["url"].format(query=urllib.parse.quote(q), num=max_results)
-            req = urllib.request.Request(url, headers=dict(cfg["headers"]))
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                html = resp.read().decode("utf-8", errors="replace")
-            results = PARSERS.get(self.engine, _parse_bing)(html)
-            return _format_for_user(query, results, cfg["name"])
+            results, engine_name = self._fetch_results(query, max_results)
+            return _format_for_user(query, results, engine_name)
         except urllib.error.HTTPError as e:
             return f'🔍 搜索 HTTP 错误({e.code})，请稍后重试。'
         except urllib.error.URLError as e:
@@ -310,7 +352,7 @@ class WebSearchTool(FunctionTool):
     "astrbot_plugin_web_search",
     "jujg12123",
     "多引擎搜索（Bing/搜狗/Google），LLM可主动调用，默认Bing",
-    "3.1.5",
+    "3.1.6",
     "https://github.com/jujg12123/astrbot-web-search",
 )
 class WebSearchPlugin(Star):
@@ -325,7 +367,7 @@ class WebSearchPlugin(Star):
         self._backend = SearchBackend(engine)
         self._tool = WebSearchTool(backend=self._backend)
         context.add_llm_tools(self._tool)
-        logger.info(f"[WebSearch] v3.1.5 已就绪 | 引擎={engine} | 中文分段引号优化=ON")
+        logger.info(f"[WebSearch] v3.1.6 已就绪 | 引擎={engine} | 中文分段引号优化=ON | 拆字回退=ON")
 
     async def terminate(self):
         self.context.provider_manager.llm_tools.remove_func(self._tool.name)
@@ -341,7 +383,7 @@ class WebSearchPlugin(Star):
 
         if not query:
             yield event.plain_result(
-                "🔍 **多引擎搜索插件 v3.1.5**\n"
+                "🔍 **多引擎搜索插件 v3.1.6**\n"
                 "用法：/websearch 关键词\n"
                 f"当前引擎：{self._backend.engine}\n"
                 "输入 /websearch changelog 查看更新日志"
