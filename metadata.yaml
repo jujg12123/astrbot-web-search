@@ -1,6 +1,6 @@
 name: astrbot_plugin_web_search
 display_name: 多引擎搜索
 desc: 默认Bing/搜狗/Google多引擎搜索，中文自动引号防拆字优化，搜索结果原样返回无二次加工，LLM可主动调用
-version: v3.1.4
-author: openclaw
+version: v3.1.5
+author: jujg12123
 repo: https://github.com/jujg12123/astrbot-web-search
